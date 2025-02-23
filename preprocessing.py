@@ -6,8 +6,12 @@ import torch
 import re
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
+import nlpaug.augmenter.char as nac
+import nlpaug.augmenter.word as naw
+import nlpaug.augmenter.sentence as nas
 
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 class DPMDataset(Dataset):
     """
@@ -160,15 +164,77 @@ def clean_text(text: str, whitespacing = True, standard_tokens = True, punctuati
         return text.strip()
 
 
+
+def augmenter (text, deletion=False, Synonym=False, Spelling=False, CWE=False):
+
+    augmented_texts=text
+
+    if Spelling:
+        aug = naw.SpellingAug()
+        augmented_texts = aug.augment(augmented_texts, n=3)
+        
+    if deletion:
+        aug = naw.RandomWordAug(action="delete")
+        augmented_texts = aug.augment(augmented_texts)
+
+    if Synonym:
+        aug = naw.SynonymAug(aug_src='wordnet')
+        augmented_texts = aug.augment(augmented_texts)
+    
+    if CWE:
+        aug = naw.ContextualWordEmbsAug(
+            model_path = 'distilbert-base-uncased', 
+            action = "substitute",
+            device = device,
+            top_k = 20
+        )
+        augmented_texts = aug.augment(text)
+        
+    return augmented_texts[0]
+
+
 def preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Preprocess the data to be used by the model
     """
     df = df.copy()
     # df["text"] = df.apply(lambda row: f"This concerns the {row['community']}. {row['text']}", axis=1)
-    df["text"] = df["text"].apply(lambda x: clean_text(x))
+    df["text"] = df["text"].apply(lambda x: clean_text(x, 
+        whitespacing=False, 
+        standard_tokens=True,
+        punctuation=True, 
+        stop_words=True, 
+        lower=False
+    ))
     return df
 
+
+def augment_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds new PCL data
+    """
+    df = df.copy(deep=True)
+    augmented_rows = []
+
+    for index, row in df.iterrows():
+        if row['label'] == 0:
+            continue
+        else:
+            # Apply the augmenter function to the 'text' column
+            augmented_text = augmenter(row['text'], deletion=False, Synonym=True, Spelling=False, CWE=True)
+            # Create a new row with the augmented text
+            augmented_row = row.copy()
+            augmented_row['text'] = augmented_text
+            
+            # Append the new row to the list
+            augmented_rows.append(augmented_row)
+
+    # Convert the list of augmented rows to a DataFrame
+    augmented_rows_df = pd.DataFrame(augmented_rows)
+
+    # Append the new DataFrame to the original DataFrame
+    augmented_df = pd.concat([df, augmented_rows_df])
+    return augmented_df
 
 
 
