@@ -127,42 +127,41 @@ def load_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 def clean_text(text: str, whitespacing = True, standard_tokens = True, punctuation=True, stop_words = False,lower=False) -> str:
 
-        stop_words = stopwords.words("english")
+    stop_words = stopwords.words("english")
+    
+    if stop_words:
+        # Stop words --> token
+        words = word_tokenize(text)
+        words = [word for word in words if word not in stopwords.words("english") and word.isalpha()]
+        text = " ".join(words)
+
+    if lower:
+            text=text.lower()
+
+    if whitespacing:
+        # Whtespacing and other standarisation
+        text = text.strip('"')  # removing " at start of sentences
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub('<h>', '.', text)
+
+    if standard_tokens:
+        # Removing unecessary info
+        text = re.sub("(?<![\w])[0-9]+[.,]?[0-9]*(?![\w])", "[NUM]", text)
+        text = re.sub("\[NUM\]-\[NUM\]", "[NUM]", text)
+        # To delete account numbers 12-5223-231
+        text = re.sub("\[NUM\]-\[NUM\]", "[NUM]", text)
+        text = re.sub(r"https? : \S+", "[WEBSITE]", text)  # Tokenize links
+        text = re.sub("(?<![\w])20[0-5][0-9]-?[0-9]*", "[YEAR]", text)  # Year token
+        text = re.sub(r"@[\S]+", "[USERNAME]", text)  # removing referencing on usernames with @
+        text = re.sub("(?<![\w])1[0-9]{3}-?[0-9]*", "[YEAR]", text)  # Year token
+        #text = re.sub("(?<=\[NUM\])-(?=[a-zA-Z])", " ", text)
+
+    if punctuation:
+        text = re.sub(r":\S+", "", text)  # removing smileys with : (like :),:D,:( etc)
+        text = re.sub(r"\"+", "", text)  # replacing repetitions of punctations
+        text = re.sub(r"(\W)(?=\1)", "", text)  # replacing repetitions of punctations
         
-        if stop_words:
-            # Stop words --> token
-            words = word_tokenize(text)
-            words = [word for word in words if word not in stopwords.words("english") and word.isalpha()]
-            text = " ".join(words)
-
-        if lower:
-             text=text.lower()
-
-        if whitespacing:
-            # Whtespacing and other standarisation
-            text = text.strip('"')  # removing " at start of sentences
-            text = re.sub(r'\s+', ' ', text)
-            text = re.sub('<h>', '.', text)
-
-        if standard_tokens:
-            # Removing unecessary info
-            text = re.sub("(?<![\w])[0-9]+[.,]?[0-9]*(?![\w])", "[NUM]", text)
-            text = re.sub("\[NUM\]-\[NUM\]", "[NUM]", text)
-            # To delete account numbers 12-5223-231
-            text = re.sub("\[NUM\]-\[NUM\]", "[NUM]", text)
-            text = re.sub(r"https? : \S+", "[WEBSITE]", text)  # Tokenize links
-            text = re.sub("(?<![\w])20[0-5][0-9]-?[0-9]*", "[YEAR]", text)  # Year token
-            text = re.sub(r"@[\S]+", "[USERNAME]", text)  # removing referencing on usernames with @
-            text = re.sub("(?<![\w])1[0-9]{3}-?[0-9]*", "[YEAR]", text)  # Year token
-            #text = re.sub("(?<=\[NUM\])-(?=[a-zA-Z])", " ", text)
-
-        if punctuation:
-            text = re.sub(r":\S+", "", text)  # removing smileys with : (like :),:D,:( etc)
-            text = re.sub(r"\"+", "", text)  # replacing repetitions of punctations
-            text = re.sub(r"(\W)(?=\1)", "", text)  # replacing repetitions of punctations
-            
-        return text.strip()
-
+    return text.strip()
 
 
 def augmenter (text, deletion=False, Synonym=False, Spelling=False, CWE=False):
@@ -184,8 +183,8 @@ def augmenter (text, deletion=False, Synonym=False, Spelling=False, CWE=False):
     if CWE:
         aug = naw.ContextualWordEmbsAug(
             model_path = 'distilbert-base-uncased', 
-            action = "substitute",
             device = device,
+            action = "substitute",
             top_k = 20
         )
         augmented_texts = aug.augment(text)
@@ -193,30 +192,11 @@ def augmenter (text, deletion=False, Synonym=False, Spelling=False, CWE=False):
     return augmented_texts[0]
 
 
-def preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Preprocess the data to be used by the model
-    """
-    df = df.copy()
-    # df["text"] = df.apply(lambda row: f"This concerns the {row['community']}. {row['text']}", axis=1)
-    df["text"] = df["text"].apply(lambda x: clean_text(x, 
-        whitespacing=False, 
-        standard_tokens=True,
-        punctuation=True, 
-        stop_words=True, 
-        lower=False
-    ))
-    return df
-
-
-def augment_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Adds new PCL data
-    """
-    df = df.copy(deep=True)
+def augment_data_df(df: pd.DataFrame):
+    augmented_train_df = df.copy()
     augmented_rows = []
 
-    for index, row in df.iterrows():
+    for index, row in augmented_train_df.iterrows():
         if row['label'] == 0:
             continue
         else:
@@ -233,11 +213,30 @@ def augment_data(df: pd.DataFrame) -> pd.DataFrame:
     augmented_rows_df = pd.DataFrame(augmented_rows)
 
     # Append the new DataFrame to the original DataFrame
-    augmented_df = pd.concat([df, augmented_rows_df])
-    return augmented_df
+    augmented_train_df = pd.concat([augmented_train_df, augmented_rows_df])
+
+    return augmented_train_df
 
 
+def preprocess_data(df: pd.DataFrame, clean_data=False, augment_data=False, add_country=False, add_community=False) -> pd.DataFrame:
+    """
+    Preprocess the data to be used by the model
+    """
+    df = df.copy()
+    if clean_data:
+        df["text"] = df["text"].apply(lambda x: clean_text(x, 
+            whitespacing=False, 
+            standard_tokens=True,
+            punctuation=True, 
+            stop_words=False, 
+            lower=False
+        ))
+    if augment_data:
+        df = augment_data_df(df)
+    if add_country:
+        df["text"] = df.apply(lambda row: f"{row["country"]} , {row['text']}", axis=1)
+    if add_community:
+        df["text"] = df.apply(lambda row: f"{row['community']} , {row['text']}", axis=1)
+    
+    return df
 
-
-if __name__ == "__main__":
-    trdf1, tedf1, data_test = load_data()
