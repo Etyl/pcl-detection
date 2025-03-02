@@ -1,7 +1,6 @@
 import pandas as pd
 from dont_patronize_me import DontPatronizeMe
 from typing import Tuple
-from torch.utils.data import Dataset, DataLoader
 import torch
 import re
 from nltk.corpus import stopwords
@@ -12,53 +11,6 @@ import nlpaug.augmenter.sentence as nas
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-class DPMDataset(Dataset):
-    """
-    Dataset for regular use with Roberta/Deberta
-    
-    """
-    def __init__(self, df, tokenizer, max_len, test_set=False):
-        
-        self.test_set = test_set
-        self.tokenizer = tokenizer
-        self.text = df.text
-
-        if not test_set:
-            self.label = df.label
-
-        self.max_len = max_len
-
-    def __len__(self):
-        return len(self.text)
-
-    def __getitem__(self, idx):
-        if not self.test_set:
-            return {
-                'text': self.text[idx],
-                'target': self.label[idx]
-            }
-        else:
-            return {
-                'text': self.text[idx],
-            }
-
-
-    def collate_fn(self, batch):
-        texts = []
-        labels = []
-
-
-        for b in batch:
-            texts.append(b['text'])
-            if not self.test_set:
-                labels.append(b['target'])
-
-        encodings = self.tokenizer(texts, return_tensors='pt', padding=True, truncation=True, max_length=self.max_len)
-        if not self.test_set:
-            encodings['target'] = torch.tensor(labels)
-
-        return encodings
 
 
 def labels2file(p, outf_path):
@@ -211,6 +163,7 @@ def augment_data_df(df: pd.DataFrame):
 
     # Convert the list of augmented rows to a DataFrame
     augmented_rows_df = pd.DataFrame(augmented_rows)
+    augmented_rows_df["label"] = 1
 
     # Append the new DataFrame to the original DataFrame
     augmented_train_df = pd.concat([augmented_train_df, augmented_rows_df])
